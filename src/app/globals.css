@@ -1,6 +1,13 @@
 @import "tailwindcss";
 
+:root {
+  --bg-main: #0b171d;
+  --bg-card: #13232c;
+  --border-card: #1b3340;
+  --primary-teal: #257585;
+}
+
 body {
-  background-color: #0f171e;
-  color: #f8fafc;
+  background-color: var(--bg-main);
+  color: #f1f5f9;
 }
