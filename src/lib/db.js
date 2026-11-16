@@ -1,11 +1,11 @@
 import mysql from "mysql2/promise";
 
 export const db = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "", // Kosongkan jika pakai XAMPP default
-  database: "rentory",
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
+  host: process.env.DB_HOST || "127.0.0.1",
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || "root",
+  password: process.env.DB_PASSWORD || "",
+  database: process.env.DB_NAME || "rentory",
+  ssl:
+    process.env.DB_SSL === "true" ? { rejectUnauthorized: false } : undefined,
 });
