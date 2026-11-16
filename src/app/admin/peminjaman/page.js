@@ -1,68 +1,116 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+// Helper di luar komponen agar tidak memicu warning dependency di useEffect
+const formatStatusLabel = (dbStatus) => {
+  if (!dbStatus || dbStatus === "Pending" || dbStatus === "Menunggu")
+    return "Menunggu";
+  if (dbStatus === "Approved" || dbStatus === "Disetujui") return "Disetujui";
+  if (dbStatus === "Rejected" || dbStatus === "Ditolak") return "Ditolak";
+  return dbStatus;
+};
+
+const formatTanggalWaktu = (tglMulai, tglSelesai) => {
+  if (!tglMulai) return { tanggal: "-", durasi: "-" };
+  const start = new Date(tglMulai);
+  const tanggal = start.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+
+  if (!tglSelesai) return { tanggal, durasi: "-" };
+  const end = new Date(tglSelesai);
+  const jamMulai = start.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const jamSelesai = end.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return {
+    tanggal,
+    durasi: `${jamMulai} - ${jamSelesai}`,
+  };
+};
 
 export default function PeminjamanPage() {
   const [filterStatus, setFilterStatus] = useState("Semua");
   const [searchQuery, setSearchQuery] = useState("");
+  const [pengajuanList, setPengajuanList] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const [pengajuanList, setPengajuanList] = useState([
-    {
-      id: "PJ-001",
-      peminjam: "HMJ Biologi",
-      item: "Proyektor (2 unit)",
-      tanggal: "3 Agu 2026",
-      durasi: "2 Hari",
-      status: "Menunggu",
-    },
-    {
-      id: "PJ-002",
-      peminjam: "UKM Fotografi",
-      item: "Ruang Seminar",
-      tanggal: "4 Agu 2026",
-      durasi: "3 Jam",
-      status: "Menunggu",
-    },
-    {
-      id: "PJ-003",
-      peminjam: "BEM FMIPA",
-      item: "Gedung AS Biologi",
-      tanggal: "2 Agu 2026",
-      durasi: "5 Jam",
-      status: "Disetujui",
-    },
-    {
-      id: "PJ-004",
-      peminjam: "HMJ Kimia",
-      item: "Sound System",
-      tanggal: "7 Agu 2026",
-      durasi: "1 Hari",
-      status: "Disetujui",
-    },
-    {
-      id: "PJ-005",
-      peminjam: "UKM Musik",
-      item: "Aula Utama",
-      tanggal: "1 Agu 2026",
-      durasi: "4 Jam",
-      status: "Ditolak",
-    },
-    {
-      id: "PJ-006",
-      peminjam: "HMJ Fisika",
-      item: "Kamera DSLR",
-      tanggal: "6 Agu 2026",
-      durasi: "2 Hari",
-      status: "Menunggu",
-    },
-  ]);
+  useEffect(() => {
+    let isMounted = true;
 
-  const handleUpdateStatus = (id, newStatus) => {
-    setPengajuanList(
-      pengajuanList.map((item) =>
-        item.id === id ? { ...item, status: newStatus } : item,
-      ),
-    );
+    const loadPengajuan = async () => {
+      try {
+        const res = await fetch("/api/peminjaman");
+        const json = await res.json();
+        if (isMounted && json.success && Array.isArray(json.data)) {
+          const mapped = json.data.map((row) => {
+            const { tanggal, durasi } = formatTanggalWaktu(
+              row.tgl_mulai,
+              row.tgl_selesai,
+            );
+            return {
+              id_db: row.id_peminjaman_ruang,
+              id: `PJ-${String(row.id_peminjaman_ruang).padStart(3, "0")}`,
+              peminjam:
+                row.organisasi || row.peminjam || `User #${row.id_user}`,
+              item:
+                row.nama_kegiatan || row.nama_ruangan || row.nama_gedung || "-",
+              tanggal,
+              durasi,
+              status: formatStatusLabel(row.status),
+              file_surat: row.file_surat,
+            };
+          });
+          setPengajuanList(mapped);
+        }
+      } catch (error) {
+        console.error("Gagal memuat data peminjaman:", error);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    loadPengajuan();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleUpdateStatus = async (idDb, newLabelStatus) => {
+    const dbStatusValue =
+      newLabelStatus === "Disetujui" ? "Approved" : "Rejected";
+    try {
+      const res = await fetch("/api/peminjaman", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id_peminjaman_ruang: idDb,
+          status: dbStatusValue,
+        }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setPengajuanList((prev) =>
+          prev.map((item) =>
+            item.id_db === idDb ? { ...item, status: newLabelStatus } : item,
+          ),
+        );
+      } else {
+        alert(`Gagal memperbarui status: ${result.message}`);
+      }
+    } catch (error) {
+      alert("Terjadi kesalahan koneksi saat memperbarui status.");
+      console.error(error);
+    }
   };
 
   return (
@@ -102,85 +150,122 @@ export default function PeminjamanPage() {
               <tr className="border-b border-[#213c4c] text-slate-400 uppercase">
                 <th className="py-3 px-3">No. Pengajuan</th>
                 <th className="py-3 px-3">Peminjam</th>
-                <th className="py-3 px-3">Item</th>
+                <th className="py-3 px-3">Item / Kegiatan</th>
                 <th className="py-3 px-3">Tanggal</th>
-                <th className="py-3 px-3">Durasi</th>
+                <th className="py-3 px-3">Waktu</th>
+                <th className="py-3 px-3 text-center">Surat</th>
                 <th className="py-3 px-3">Status</th>
                 <th className="py-3 px-3 text-center">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1b3340]">
-              {pengajuanList
-                .filter(
-                  (item) =>
-                    filterStatus === "Semua" || item.status === filterStatus,
-                )
-                .filter(
-                  (item) =>
-                    item.peminjam
-                      .toLowerCase()
-                      .includes(searchQuery.toLowerCase()) ||
-                    item.item.toLowerCase().includes(searchQuery.toLowerCase()),
-                )
-                .map((item) => (
-                  <tr key={item.id} className="hover:bg-[#192f3b]">
-                    <td className="py-3 px-3 font-mono text-cyan-400 font-bold">
-                      {item.id}
-                    </td>
-                    <td className="py-3 px-3 font-bold text-white">
-                      {item.peminjam}
-                    </td>
-                    <td className="py-3 px-3 text-slate-300">{item.item}</td>
-                    <td className="py-3 px-3 text-slate-400">{item.tanggal}</td>
-                    <td className="py-3 px-3 text-slate-400">{item.durasi}</td>
-                    <td className="py-3 px-3">
-                      <span
-                        className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          item.status === "Disetujui"
-                            ? "bg-emerald-950 text-emerald-300 border border-emerald-800/50"
-                            : item.status === "Menunggu"
-                              ? "bg-amber-950 text-amber-300 border border-amber-800/50"
-                              : "bg-rose-950 text-rose-300 border border-rose-800/50"
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-center space-x-1.5">
-                      {item.status === "Menunggu" ? (
-                        <>
-                          <button
-                            onClick={() =>
-                              handleUpdateStatus(item.id, "Disetujui")
-                            }
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px]"
+              {loading ? (
+                <tr>
+                  <td colSpan="8" className="py-6 text-center text-slate-400">
+                    Memuat data pengajuan...
+                  </td>
+                </tr>
+              ) : pengajuanList.length === 0 ? (
+                <tr>
+                  <td colSpan="8" className="py-6 text-center text-slate-400">
+                    Belum ada pengajuan peminjaman.
+                  </td>
+                </tr>
+              ) : (
+                pengajuanList
+                  .filter(
+                    (item) =>
+                      filterStatus === "Semua" || item.status === filterStatus,
+                  )
+                  .filter(
+                    (item) =>
+                      item.peminjam
+                        .toLowerCase()
+                        .includes(searchQuery.toLowerCase()) ||
+                      item.item
+                        .toLowerCase()
+                        .includes(searchQuery.toLowerCase()),
+                  )
+                  .map((item) => (
+                    <tr key={item.id_db} className="hover:bg-[#192f3b]">
+                      <td className="py-3 px-3 font-mono text-cyan-400 font-bold">
+                        {item.id}
+                      </td>
+                      <td className="py-3 px-3 font-bold text-white">
+                        {item.peminjam}
+                      </td>
+                      <td className="py-3 px-3 text-slate-300">{item.item}</td>
+                      <td className="py-3 px-3 text-slate-400">
+                        {item.tanggal}
+                      </td>
+                      <td className="py-3 px-3 text-slate-400">
+                        {item.durasi}
+                      </td>
+                      <td className="py-3 px-3 text-center">
+                        {item.file_surat ? (
+                          <a
+                            href={item.file_surat}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-700/50 rounded-lg text-[10px] font-bold inline-block transition"
                           >
-                            Setujui
-                          </button>
-                          <button
-                            onClick={() =>
-                              handleUpdateStatus(item.id, "Ditolak")
-                            }
-                            className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-[10px]"
-                          >
-                            Tolak
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          onClick={() =>
-                            alert(
-                              `Detail Pengajuan ${item.id}:\nPeminjam: ${item.peminjam}\nItem: ${item.item}`,
-                            )
-                          }
-                          className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold rounded-lg text-[10px]"
+                            Lihat PDF
+                          </a>
+                        ) : (
+                          <span className="text-slate-500 text-[10px]">
+                            Tidak ada
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            item.status === "Disetujui"
+                              ? "bg-emerald-950 text-emerald-300 border border-emerald-800/50"
+                              : item.status === "Menunggu"
+                                ? "bg-amber-950 text-amber-300 border border-amber-800/50"
+                                : "bg-rose-950 text-rose-300 border border-rose-800/50"
+                          }`}
                         >
-                          Detail
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                          {item.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-center space-x-1.5">
+                        {item.status === "Menunggu" ? (
+                          <>
+                            <button
+                              onClick={() =>
+                                handleUpdateStatus(item.id_db, "Disetujui")
+                              }
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px]"
+                            >
+                              Setujui
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleUpdateStatus(item.id_db, "Ditolak")
+                              }
+                              className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg text-[10px]"
+                            >
+                              Tolak
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() =>
+                              alert(
+                                `Detail Pengajuan ${item.id}:\nPeminjam: ${item.peminjam}\nItem: ${item.item}\nStatus: ${item.status}`,
+                              )
+                            }
+                            className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold rounded-lg text-[10px]"
+                          >
+                            Detail
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+              )}
             </tbody>
           </table>
         </div>

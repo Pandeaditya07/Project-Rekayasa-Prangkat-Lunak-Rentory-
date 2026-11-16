@@ -47,10 +47,12 @@ export default function AuthPage() {
 
       if (data.success) {
         if (isLogin) {
+          // Simpan data user yang sedang login ke localStorage agar tiap akun terisolasi
+          localStorage.setItem("user", JSON.stringify(data.user));
+
           if (data.user.role === "admin") {
             router.push("/admin");
           } else {
-            // Arahkan ke rute dashboard utama user
             router.push("/user/dashboard");
           }
         } else {

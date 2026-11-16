@@ -7,7 +7,7 @@ export async function POST(request) {
 
     // 1. Cari user berdasarkan username di MySQL
     const [rows] = await db.query(
-      "SELECT id_user, nama, username, password_hash, role FROM users WHERE username = ?",
+      "SELECT id_user, nama, username, organisasi, password_hash, role FROM users WHERE username = ?",
       [username],
     );
 
@@ -28,14 +28,16 @@ export async function POST(request) {
       );
     }
 
-    // 3. Jika cocok, izinkan masuk
+    // 3. Jika cocok, kirim identitas lengkap akun yang sedang login
     return NextResponse.json({
       success: true,
       message: "Login berhasil!",
       user: {
         id: user.id_user,
+        id_user: user.id_user,
         nama: user.nama,
         username: user.username,
+        organisasi: user.organisasi || "",
         role: user.role,
       },
     });
