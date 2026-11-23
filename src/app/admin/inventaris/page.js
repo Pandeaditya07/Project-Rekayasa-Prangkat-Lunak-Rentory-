@@ -41,7 +41,7 @@ export default function InventarisPage() {
             nama: row.nama_inventaris || row.nama_barang || row.nama || "-",
             kategori: row.kategori || "Elektronik",
             jumlah: qty,
-            tersedia: qty,
+            tersedia: Number(row.tersedia ?? qty),
             kondisi: row.kondisi || "Baik",
           };
         });
@@ -70,7 +70,7 @@ export default function InventarisPage() {
               nama: row.nama_inventaris || row.nama_barang || row.nama || "-",
               kategori: row.kategori || "Elektronik",
               jumlah: qty,
-              tersedia: qty,
+              tersedia: Number(row.tersedia ?? qty),
               kondisi: row.kondisi || "Baik",
             };
           });

@@ -1,7 +1,22 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
-// Helper mendeteksi nama kolom asli pada tabel `inventaris` di MySQL
+const STOK_CANDIDATES = [
+  "jumlah",
+  "jumlah_unit",
+  "jumlah_barang",
+  "jumlah_total",
+  "jumlah_tersedia",
+  "stok",
+  "stok_barang",
+  "tersedia",
+  "qty",
+  "kuantitas",
+  "total",
+  "unit",
+];
+
+// Helper mendeteksi nama kolom asli pada tabel `inventaris` di MySQL/TiDB
 async function getInventarisColumns() {
   const [cols] = await db.query("SHOW COLUMNS FROM inventaris");
   const fields = cols.map((c) => c.Field);
@@ -27,56 +42,74 @@ async function getInventarisColumns() {
     ["kategori", "jenis", "tipe"].includes(f),
   );
 
-  // Cari kolom angka/stok apa pun di tabel inventaris (selain id)
-  const jumlahCol =
-    fields.find((f) =>
-      [
-        "jumlah",
-        "jumlah_unit",
-        "jumlah_barang",
-        "jumlah_total",
-        "jumlah_tersedia",
-        "stok",
-        "stok_barang",
-        "tersedia",
-        "qty",
-        "kuantitas",
-        "total",
-        "unit",
-      ].includes(f),
-    ) ||
-    cols.find(
+  // Kumpulkan SEMUA kolom stok/jumlah yang ada di tabel
+  let jumlahCols = fields.filter((f) => STOK_CANDIDATES.includes(f));
+
+  if (jumlahCols.length === 0) {
+    const intCol = cols.find(
       (c) =>
         c.Field !== idCol &&
         !c.Field.startsWith("id_") &&
         /int|decimal|float|double/i.test(c.Type),
     )?.Field;
+    if (intCol) jumlahCols = [intCol];
+  }
 
   const kondisiCol = fields.find((f) =>
     ["kondisi", "status", "keadaan"].includes(f),
   );
 
-  return { idCol, namaCol, kategoriCol, jumlahCol, kondisiCol };
+  return { idCol, namaCol, kategoriCol, jumlahCols, kondisiCol };
 }
 
-// GET: Ambil semua data inventaris & normalkan key agar konsisten di frontend
+// GET: Ambil semua data inventaris + hitung otomatis stok tersedia
 export async function GET() {
   try {
-    const { idCol, namaCol, kategoriCol, jumlahCol, kondisiCol } =
+    const { idCol, namaCol, kategoriCol, jumlahCols, kondisiCol } =
       await getInventarisColumns();
 
     const [rows] = await db.query(
       `SELECT * FROM inventaris ORDER BY ${idCol} DESC`,
     );
 
-    const normalized = rows.map((row) => ({
-      id_inventaris: row[idCol],
-      nama_inventaris: row[namaCol] || "-",
-      kategori: kategoriCol ? row[kategoriCol] || "Elektronik" : "Elektronik",
-      // Jika tabel tidak punya kolom stok sama sekali, set null agar tidak dianggap "Stok Habis (0)"
-      jumlah: jumlahCol ? Number(row[jumlahCol] ?? 0) : null,
-      kondisi: kondisiCol ? row[kondisiCol] || "Baik" : "Baik",
-    }));
+    // Hitung barang inventaris yang sedang dipinjam (status Approved / Menunggu Pengembalian)
+    let activeLoans = [];
+    try {
+      const [loanRows] = await db.query(
+        `SELECT nama_kegiatan FROM peminjaman_ruang 
+         WHERE status IN ('Approved', 'Menunggu Pengembalian') 
+           AND UPPER(nama_kegiatan) LIKE '[INVENTARIS]%'`,
+      );
+      activeLoans = loanRows.map((l) => (l.nama_kegiatan || "").toLowerCase());
+    } catch {
+      activeLoans = [];
+    }
+
+    const normalized = rows.map((row) => {
+      const namaBarang = row[namaCol] || "-";
+
+      // Ambil nilai terbesar dari kolom stok yang tersedia agar tidak tertimpa kolom 0
+      const totalJumlah =
+        jumlahCols.length > 0
+          ? Math.max(...jumlahCols.map((col) => Number(row[col] ?? 0)))
+          : 0;
+
+      // Hitung berapa unit barang ini yang sedang dipinjam aktif
+      const dipinjamCount = activeLoans.filter((keg) =>
+        keg.includes(namaBarang.toLowerCase()),
+      ).length;
+
+      const tersedia = Math.max(0, totalJumlah - dipinjamCount);
+
+      return {
+        id_inventaris: row[idCol],
+        nama_inventaris: namaBarang,
+        kategori: kategoriCol ? row[kategoriCol] || "Elektronik" : "Elektronik",
+        jumlah: totalJumlah,
+        tersedia,
+        kondisi: kondisiCol ? row[kondisiCol] || "Baik" : "Baik",
+      };
+    });
 
     return NextResponse.json({ success: true, data: normalized });
   } catch (error) {
@@ -88,16 +121,16 @@ export async function GET() {
   }
 }
 
-// POST: Tambah data inventaris baru sesuai nama kolom asli di tabel
+// POST: Tambah data inventaris baru & isi semua kolom jumlah/stok yang ada
 export async function POST(req) {
   try {
     const body = await req.json();
     const nama = body.nama_inventaris || body.nama_barang || body.nama || "";
     const kategori = body.kategori || "Elektronik";
-    const jumlah = Number(body.jumlah ?? body.stok ?? 1);
+    const jumlah = Number(body.jumlah ?? body.stok ?? 0);
     const kondisi = body.kondisi || "Baik";
 
-    const { namaCol, kategoriCol, jumlahCol, kondisiCol } =
+    const { namaCol, kategoriCol, jumlahCols, kondisiCol } =
       await getInventarisColumns();
 
     const insertCols = [namaCol];
@@ -107,8 +140,8 @@ export async function POST(req) {
       insertCols.push(kategoriCol);
       insertVals.push(kategori);
     }
-    if (jumlahCol) {
-      insertCols.push(jumlahCol);
+    for (const col of jumlahCols) {
+      insertCols.push(col);
       insertVals.push(jumlah);
     }
     if (kondisiCol) {
@@ -142,10 +175,10 @@ export async function PUT(req) {
     const id = body.id_inventaris || body.id;
     const nama = body.nama_inventaris || body.nama_barang || body.nama || "";
     const kategori = body.kategori || "Elektronik";
-    const jumlah = Number(body.jumlah ?? body.stok ?? 1);
+    const jumlah = Number(body.jumlah ?? body.stok ?? 0);
     const kondisi = body.kondisi || "Baik";
 
-    const { idCol, namaCol, kategoriCol, jumlahCol, kondisiCol } =
+    const { idCol, namaCol, kategoriCol, jumlahCols, kondisiCol } =
       await getInventarisColumns();
 
     const updates = [`${namaCol} = ?`];
@@ -155,8 +188,8 @@ export async function PUT(req) {
       updates.push(`${kategoriCol} = ?`);
       values.push(kategori);
     }
-    if (jumlahCol) {
-      updates.push(`${jumlahCol} = ?`);
+    for (const col of jumlahCols) {
+      updates.push(`${col} = ?`);
       values.push(jumlah);
     }
     if (kondisiCol) {
