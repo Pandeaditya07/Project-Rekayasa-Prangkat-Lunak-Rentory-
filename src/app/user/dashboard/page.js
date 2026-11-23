@@ -2,6 +2,30 @@
 
 import { useState, useEffect } from "react";
 
+const NAMA_BULAN = [
+  "Januari",
+  "Februari",
+  "Maret",
+  "April",
+  "Mei",
+  "Juni",
+  "Juli",
+  "Agustus",
+  "September",
+  "Oktober",
+  "November",
+  "Desember",
+];
+
+const NAMA_HARI = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+
+const toDateKey = (dateObj) => {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const d = String(dateObj.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
+
 const mapDbStatusToBadge = (dbStatus) => {
   if (!dbStatus || dbStatus === "Pending" || dbStatus === "Menunggu")
     return "Pending";
@@ -26,6 +50,15 @@ export default function UserDashboardPage() {
     totalInventaris: 0,
   });
   const [loading, setLoading] = useState(true);
+
+  // State Kalender Interaktif
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [selectedDateKey, setSelectedDateKey] = useState(() =>
+    toDateKey(new Date()),
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -67,10 +100,15 @@ export default function UserDashboardPage() {
                   })
                 : "-";
 
+              const dateKeyAcara = row.tgl_mulai
+                ? toDateKey(new Date(row.tgl_mulai))
+                : null;
+
               return {
                 id: row.id_peminjaman_ruang,
                 id_user: Number(row.id_user),
                 tanggal: tglPengajuan,
+                dateKeyAcara,
                 user: row.username || row.peminjam || `User #${row.id_user}`,
                 aktivitas:
                   row.nama_kegiatan ||
@@ -85,7 +123,6 @@ export default function UserDashboardPage() {
 
             setAllActivities(mappedAll);
 
-            // Saring hanya data milik akun yang sedang login
             const filteredMine = currentUserId
               ? mappedAll.filter((item) => item.id_user === currentUserId)
               : [];
@@ -106,7 +143,6 @@ export default function UserDashboardPage() {
     };
   }, []);
 
-  // Ketersediaan umum = total di DB dikurangi semua peminjaman yang ACC
   const totalSemuaGedungDipinjam = allActivities.filter(
     (a) => a.kategori === "Gedung" && a.status === "ACC",
   ).length;
@@ -115,7 +151,6 @@ export default function UserDashboardPage() {
     (a) => a.kategori === "Inventaris" && a.status === "ACC",
   ).length;
 
-  // Jumlah yang dipinjam khusus oleh akun yang sedang login
   const gedungDipinjamSaya = myActivities.filter(
     (a) => a.kategori === "Gedung" && a.status === "ACC",
   ).length;
@@ -133,6 +168,56 @@ export default function UserDashboardPage() {
     dbTotals.totalInventaris - totalSemuaInventarisDipinjam,
   );
 
+  // Kalkulasi Grid Kalender Bulanan
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+  const startOffset = (firstDayOfMonth + 6) % 7;
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+  const calendarCells = [];
+  for (let i = startOffset - 1; i >= 0; i--) {
+    calendarCells.push({
+      day: daysInPrevMonth - i,
+      inMonth: false,
+      dateKey: toDateKey(new Date(year, month - 1, daysInPrevMonth - i)),
+    });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    calendarCells.push({
+      day: d,
+      inMonth: true,
+      dateKey: toDateKey(new Date(year, month, d)),
+    });
+  }
+  while (calendarCells.length < 35) {
+    const nextDay = calendarCells.length - (startOffset + daysInMonth) + 1;
+    calendarCells.push({
+      day: nextDay,
+      inMonth: false,
+      dateKey: toDateKey(new Date(year, month + 1, nextDay)),
+    });
+  }
+
+  const todayKey = toDateKey(new Date());
+  const eventDateSet = new Set(
+    allActivities
+      .filter((a) => a.status !== "Rejected" && a.dateKeyAcara)
+      .map((a) => a.dateKeyAcara),
+  );
+  const selectedDayEvents = allActivities.filter(
+    (a) => a.status !== "Rejected" && a.dateKeyAcara === selectedDateKey,
+  );
+
+  const handlePrevMonth = () => {
+    setCurrentMonth(new Date(year, month - 1, 1));
+  };
+
+  const handleNextMonth = () => {
+    setCurrentMonth(new Date(year, month + 1, 1));
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-white tracking-tight">
@@ -141,9 +226,8 @@ export default function UserDashboardPage() {
 
       {/* Section 1: 4 Cards + Kalender Mini */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-stretch">
-        {/* 4 Cards (Grid 4 Kolom di Screen Besar) */}
+        {/* 4 Cards */}
         <div className="xl:col-span-9 grid grid-cols-2 md:grid-cols-4 gap-4">
-          {/* Card 1 */}
           <div className="bg-[#18535e]/80 border border-[#23707e]/50 rounded-2xl p-5 flex flex-col justify-center items-center text-center shadow-lg min-h-[140px]">
             <p className="text-[11px] font-medium text-cyan-100/80 mb-2">
               Ketersediaan
@@ -155,7 +239,6 @@ export default function UserDashboardPage() {
             </p>
           </div>
 
-          {/* Card 2 */}
           <div className="bg-[#18535e]/80 border border-[#23707e]/50 rounded-2xl p-5 flex flex-col justify-center items-center text-center shadow-lg min-h-[140px]">
             <p className="text-[11px] font-medium text-cyan-100/80 mb-2">
               Gedung Yang
@@ -167,7 +250,6 @@ export default function UserDashboardPage() {
             </p>
           </div>
 
-          {/* Card 3 */}
           <div className="bg-[#18535e]/80 border border-[#23707e]/50 rounded-2xl p-5 flex flex-col justify-center items-center text-center shadow-lg min-h-[140px]">
             <p className="text-[11px] font-medium text-cyan-100/80 mb-2">
               Ketersediaan Inventaris
@@ -177,7 +259,6 @@ export default function UserDashboardPage() {
             </p>
           </div>
 
-          {/* Card 4 */}
           <div className="bg-[#18535e]/80 border border-[#23707e]/50 rounded-2xl p-5 flex flex-col justify-center items-center text-center shadow-lg min-h-[140px]">
             <p className="text-[11px] font-medium text-cyan-100/80 mb-2">
               Inventaris Yang
@@ -190,64 +271,80 @@ export default function UserDashboardPage() {
           </div>
         </div>
 
-        {/* Widget Kalender Mini Kanan */}
+        {/* Widget Kalender Mini Interaktif */}
         <div className="xl:col-span-3 bg-[#0d2229] border border-[#15343d] rounded-2xl p-4 text-xs shadow-lg flex flex-col justify-between">
-          <div className="flex items-center justify-between font-semibold text-slate-300 mb-3">
-            <button type="button" className="text-slate-400 hover:text-white">
-              {"<"}
-            </button>
-            <span className="font-bold">April 2026</span>
-            <button type="button" className="text-slate-400 hover:text-white">
-              {">"}
-            </button>
+          <div>
+            <div className="flex items-center justify-between font-semibold text-slate-300 mb-3">
+              <button
+                type="button"
+                onClick={handlePrevMonth}
+                className="text-slate-400 hover:text-white px-2 py-0.5 rounded transition"
+                title="Bulan Sebelumnya"
+              >
+                {"<"}
+              </button>
+              <span className="font-bold">
+                {NAMA_BULAN[month]} {year}
+              </span>
+              <button
+                type="button"
+                onClick={handleNextMonth}
+                className="text-slate-400 hover:text-white px-2 py-0.5 rounded transition"
+                title="Bulan Berikutnya"
+              >
+                {">"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-center font-bold text-slate-500 mb-2 text-[10px]">
+              {NAMA_HARI.map((hari) => (
+                <span key={hari}>{hari}</span>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1 text-center text-slate-300 text-[11px]">
+              {calendarCells.map((cell, idx) => {
+                const isToday = cell.dateKey === todayKey;
+                const isSelected = cell.dateKey === selectedDateKey;
+                const hasEvent = eventDateSet.has(cell.dateKey);
+
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setSelectedDateKey(cell.dateKey)}
+                    className={`relative w-6 h-6 mx-auto flex items-center justify-center rounded-full transition ${
+                      isToday
+                        ? "bg-cyan-600 font-bold text-white shadow-md shadow-cyan-500/40"
+                        : isSelected
+                          ? "bg-[#184452] text-cyan-300 font-bold ring-1 ring-cyan-400"
+                          : cell.inMonth
+                            ? "text-slate-300 hover:bg-[#15343d]"
+                            : "text-slate-600"
+                    }`}
+                  >
+                    {cell.day}
+                    {hasEvent && !isToday && (
+                      <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-cyan-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="grid grid-cols-7 gap-1 text-center font-bold text-slate-500 mb-2 text-[10px]">
-            <span>Lu</span>
-            <span>Ma</span>
-            <span>Du</span>
-            <span>Dr</span>
-            <span>Vo</span>
-            <span>Se</span>
-            <span>Mo</span>
-          </div>
-          <div className="grid grid-cols-7 gap-1 text-center text-slate-300 text-[11px]">
-            <span className="text-slate-600">28</span>
-            <span className="text-slate-600">29</span>
-            <span className="text-slate-600">30</span>
-            <span>1</span>
-            <span>2</span>
-            <span>3</span>
-            <span>4</span>
-            <span>5</span>
-            <span>6</span>
-            <span>7</span>
-            <span>8</span>
-            <span className="rounded-full bg-cyan-600 font-bold text-white flex items-center justify-center w-5 h-5 mx-auto">
-              9
-            </span>
-            <span>10</span>
-            <span>11</span>
-            <span>12</span>
-            <span>13</span>
-            <span>14</span>
-            <span>15</span>
-            <span>16</span>
-            <span>17</span>
-            <span>18</span>
-            <span>19</span>
-            <span>20</span>
-            <span>21</span>
-            <span>22</span>
-            <span>23</span>
-            <span>24</span>
-            <span>25</span>
-            <span>26</span>
-            <span>27</span>
-            <span>28</span>
-            <span>29</span>
-            <span>30</span>
-            <span>31</span>
-            <span className="text-slate-600">1</span>
+
+          {/* Info Jadwal Singkat pada Tanggal yang Dipilih */}
+          <div className="mt-3 pt-2 border-t border-[#15343d] text-[10px]">
+            {selectedDayEvents.length > 0 ? (
+              <p className="text-cyan-300 truncate">
+                • {selectedDayEvents[0].aktivitas}
+                {selectedDayEvents.length > 1
+                  ? ` (+${selectedDayEvents.length - 1} lainnya)`
+                  : ""}
+              </p>
+            ) : (
+              <p className="text-slate-500">Tidak ada jadwal terpakai</p>
+            )}
           </div>
         </div>
       </div>
