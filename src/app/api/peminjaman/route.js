@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 
 // 1. GET: Ambil semua data peminjaman + ekstrak organisasi dari form + daftar gedung/ruangan + statistik
 export async function GET() {
@@ -28,7 +26,6 @@ export async function GET() {
       ORDER BY pr.id_peminjaman_ruang DESC
     `);
 
-    // Sesuaikan organisasi pengaju dari inputan form peminjaman "(Organisasi)"
     const formattedRows = rows.map((row) => {
       const rawKegiatan = row.nama_kegiatan || "";
       const matchOrg = rawKegiatan.match(/\(([^()]+)\)\s*$/);
@@ -48,7 +45,6 @@ export async function GET() {
       };
     });
 
-    // Ambil daftar gedung & ruangan dari database untuk dropdown form & statistik
     let gedungList = [];
     let ruanganList = [];
     try {
@@ -71,24 +67,23 @@ export async function GET() {
 
     const totalGedung = gedungList.length + ruanganList.length;
 
-    // Hitung total stok inventaris secara dinamis dari kolom apa pun yang tersedia
     let totalInventaris = 0;
     try {
       const [invRows] = await db.query(`SELECT * FROM inventaris`);
       totalInventaris = invRows.reduce((sum, r) => {
-        const val =
-          r.jumlah ??
-          r.jumlah_unit ??
-          r.jumlah_barang ??
-          r.jumlah_total ??
-          r.jumlah_tersedia ??
-          r.stok ??
-          r.stok_barang ??
-          r.tersedia ??
-          r.qty ??
-          r.kuantitas ??
-          1;
-        return sum + Number(val || 0);
+        const val = Math.max(
+          Number(r.jumlah ?? 0),
+          Number(r.jumlah_unit ?? 0),
+          Number(r.jumlah_barang ?? 0),
+          Number(r.jumlah_total ?? 0),
+          Number(r.jumlah_tersedia ?? 0),
+          Number(r.stok ?? 0),
+          Number(r.stok_barang ?? 0),
+          Number(r.tersedia ?? 0),
+          Number(r.qty ?? 0),
+          Number(r.kuantitas ?? 0),
+        );
+        return sum + val;
       }, 0);
     } catch (e) {
       console.error("Hitung inventaris error:", e.message);
@@ -113,7 +108,7 @@ export async function GET() {
   }
 }
 
-// 2. POST: User mengajukan peminjaman baru + Upload file surat PDF
+// 2. POST: User mengajukan peminjaman baru + Simpan file surat PDF sebagai Base64 (kompatibel Vercel)
 export async function POST(req) {
   try {
     const formData = await req.formData();
@@ -152,16 +147,8 @@ export async function POST(req) {
     if (file && typeof file === "object" && file.size > 0) {
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
-
-      const uploadDir = path.join(process.cwd(), "public", "uploads");
-      await mkdir(uploadDir, { recursive: true });
-
-      const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-      const fileName = `${Date.now()}-${safeName}`;
-      const fullPath = path.join(uploadDir, fileName);
-
-      await writeFile(fullPath, buffer);
-      filePathDB = `/uploads/${fileName}`;
+      const mimeType = file.type || "application/pdf";
+      filePathDB = `data:${mimeType};base64,${buffer.toString("base64")}`;
     }
 
     await db.query(
